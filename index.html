@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPIELZUG: Das Kartenspiel ⚽</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="game-header">
+            <h1>⚽ SPIELZUG: Das Kartenspiel</h1>
+            <div class="mode-selector" id="modeSelector">
+                <h2>Spielmodus wählen</h2>
+                <button class="mode-btn" data-mode="A">
+                    <strong>Der Realist</strong><br>
+                    <small>Abwehr gewinnt bei Gleichstand</small>
+                </button>
+                <button class="mode-btn" data-mode="B">
+                    <strong>Der Taktiker</strong><br>
+                    <small>Angreifer gewinnt bei Gleichstand</small>
+                </button>
+                <button class="mode-btn" data-mode="C">
+                    <strong>Der Torjäger</strong><br>
+                    <small>Stürmer +1 Bonus</small>
+                </button>
+            </div>
+        </div>
+
+        <div class="game-board" id="gameBoard" style="display: none;">
+            <div class="score-board">
+                <div class="team player-team">
+                    <div class="team-name">Du (Spieler)</div>
+                    <div class="team-score"><span id="playerScore">0</span> Tore</div>
+                    <div class="team-info">
+                        <small id="playerHalfInfo"></small>
+                    </div>
+                </div>
+                <div class="match-info">
+                    <div id="currentPhase"></div>
+                    <div id="halfInfo">1. Halbzeit</div>
+                </div>
+                <div class="team ai-team">
+                    <div class="team-name">🤖 Computer</div>
+                    <div class="team-score"><span id="aiScore">0</span> Tore</div>
+                    <div class="team-info">
+                        <small id="aiHalfInfo"></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="game-state" id="gameState">
+                <!-- Wird dynamisch gefüllt -->
+            </div>
+
+            <div class="action-area" id="actionArea">
+                <!-- Wird dynamisch gefüllt -->
+            </div>
+
+            <div class="battle-log" id="battleLog">
+                <h3>Spielverlauf</h3>
+                <div id="logContent"></div>
+            </div>
+        </div>
+
+        <div class="game-end" id="gameEnd" style="display: none;">
+            <div class="end-card">
+                <h2 id="endTitle"></h2>
+                <div id="endStats"></div>
+                <button class="btn-restart" onclick="location.reload()">Neues Spiel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="game-data.js"></script>
+    <script src="game-engine.js"></script>
+    <script src="ui.js"></script>
+</body>
+</html>
