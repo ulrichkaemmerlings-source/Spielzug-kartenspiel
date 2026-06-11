@@ -1,0 +1,31 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+.game-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+.game-header { text-align: center; padding: 20px 0; }
+h1 { font-size: 2em; color: #4CAF50; margin-bottom: 20px; }
+.mode-selector { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+.mode-btn { background: #16213e; border: 2px solid #4CAF50; color: #eee; padding: 16px 24px; border-radius: 10px; cursor: pointer; font-size: 1em; min-width: 160px; }
+.mode-btn:hover { background: #4CAF50; color: #000; }
+.score-board { display: flex; justify-content: space-between; align-items: center; background: #16213e; border-radius: 12px; padding: 16px 24px; margin-bottom: 20px; }
+.team { text-align: center; }
+.team-name { font-size: 0.9em; color: #aaa; }
+.team-score { font-size: 2.5em; font-weight: bold; color: #4CAF50; }
+.match-info { text-align: center; font-size: 0.9em; color: #aaa; }
+#currentPhase { font-weight: bold; color: #FFD700; font-size: 1.1em; }
+.game-state { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 16px; min-height: 100px; }
+.game-state h3 { color: #4CAF50; margin-bottom: 14px; font-size: 1.2em; }
+.card-selection { display: flex; flex-wrap: wrap; gap: 10px; }
+.tactic-card, .momentum-card { background: #0f3460; border: 1px solid #333; border-radius: 8px; padding: 12px; flex: 1 1 140px; font-size: 0.9em; transition: background 0.2s; }
+.tactic-card:hover, .momentum-card:hover { background: #1a4a8a; }
+.player-info { background: #0f3460; border-radius: 8px; padding: 12px; margin: 8px 0; font-size: 0.95em; }
+.action-area { margin-bottom: 16px; }
+.battle-log { background: #16213e; border-radius: 12px; padding: 16px; max-height: 220px; overflow-y: auto; }
+.battle-log h3 { color: #4CAF50; margin-bottom: 10px; }
+.log-entry { padding: 3px 0; font-size: 0.88em; border-bottom: 1px solid #222; color: #ccc; }
+.log-entry.goal { color: #4CAF50; font-weight: bold; }
+.log-entry.miss { color: #ff6b6b; }
+.game-end { display: flex; justify-content: center; align-items: center; min-height: 60vh; }
+.end-card { background: #16213e; border-radius: 16px; padding: 40px; text-align: center; max-width: 480px; width: 100%; border: 2px solid #4CAF50; }
+.end-card h2 { font-size: 2em; margin-bottom: 20px; }
+.btn-restart { margin-top: 24px; background: #4CAF50; color: #000; border: none; padding: 14px 36px; border-radius: 8px; font-size: 1.1em; cursor: pointer; font-weight: bold; }
+.btn-restart:hover { background: #45a049; }
