@@ -1,17 +1,17 @@
-// UI Controller for SPIELZUG - FIXED VERSION
+// UI Controller for SPIELZUG - COMPLETE REWRITE
 
 let game = null;
 
-// Initialize game with selected mode
 document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', function() {
         const mode = this.dataset.mode;
-        initializeGame(mode);
+        startGame(mode);
     });
 });
 
-function initializeGame(mode) {
+function startGame(mode) {
     game = new SPIELZUGGame(mode);
+    game.initializeDraft();
     
     document.getElementById('modeSelector').style.display = 'none';
     document.getElementById('gameBoard').style.display = 'block';
@@ -20,9 +20,10 @@ function initializeGame(mode) {
     game.log.push(`👤 Dein Trainer: ${game.playerCoach}`);
     game.log.push(`🤖 Computer-Trainer: ${game.aiCoach}`);
     game.log.push(`─────────────────────────`);
+    game.log.push(`📋 DRAFT PHASE: Abwechselnd Spieler wählen!`);
     
     updateUI();
-    startPlayerTurn();
+    showDraftPhase();
 }
 
 function updateUI() {
@@ -36,14 +37,86 @@ function updateUI() {
     logContent.innerHTML = game.log.map(entry => {
         let className = '';
         if (entry.includes('⚽') || entry.includes('TOR')) className = 'goal';
-        else if (entry.includes('Abwehr') || entry.includes('Block')) className = 'defend';
         else if (entry.includes('❌')) className = 'miss';
         return `<div class="log-entry ${className}">${entry}</div>`;
     }).reverse().join('');
     logContent.parentElement.scrollTop = logContent.parentElement.scrollHeight;
 }
 
-function startPlayerTurn() {
+// ============ DRAFT PHASE ============
+
+function showDraftPhase() {
+    const currentTurn = game.getDraftCurrentPlayer();
+    
+    if (!currentTurn) {
+        startFirstHalf();
+        return;
+    }
+    
+    if (currentTurn === 'ai') {
+        document.getElementById('currentPhase').textContent = '🤖 Computer wählt...';
+        const playerIndex = Math.floor(Math.random() * game.availablePlayers.length);
+        const player = game.availablePlayers[playerIndex];
+        
+        game.log.push(`🤖 Computer wählt: ${player.name}`);
+        updateUI();
+        
+        game.selectPlayerInDraft(playerIndex);
+        
+        setTimeout(() => showDraftPhase(), 2000);
+    } else {
+        document.getElementById('currentPhase').textContent = '👤 Du wählst...';
+        const draftCount = game.draftIndex + 1;
+        
+        const html = `
+            <div class="game-state">
+                <h3>📋 DRAFT (${draftCount}/6)</h3>
+                <p><strong>Wähle einen Spieler:</strong></p>
+                <div class="card-selection" style="max-height: 400px; overflow-y: auto;">
+                    ${game.availablePlayers.map((p, i) => `
+                        <div class="tactic-card" onclick="draftSelectPlayer(${i})" style="cursor: pointer; background: #e3f2fd; border: 2px solid #2196F3; padding: 15px;">
+                            <strong>${p.name}</strong><br>
+                            <small>${p.role} | ATT: ${p.attack} | DEF: ${p.defense}</small>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        document.getElementById('gameState').innerHTML = html;
+        document.getElementById('actionArea').innerHTML = '';
+    }
+}
+
+function draftSelectPlayer(index) {
+    const player = game.availablePlayers[index];
+    game.log.push(`👤 Du wählst: ${player.name}`);
+    updateUI();
+    
+    const isDraftFinished = game.selectPlayerInDraft(index);
+    
+    if (isDraftFinished) {
+        game.log.push(`✅ Draft abgeschlossen!`);
+        updateUI();
+        setTimeout(() => startFirstHalf(), 1500);
+    } else {
+        setTimeout(() => showDraftPhase(), 1500);
+    }
+}
+
+function startFirstHalf() {
+    game.draftPhase = false;
+    game.log.push(`─────────────────────────`);
+    game.log.push(`⚽ 1. HALBZEIT BEGINNT!`);
+    updateUI();
+    
+    setTimeout(() => {
+        startPlayerAttack();
+    }, 1500);
+}
+
+// ============ GAME PHASES ============
+
+function startPlayerAttack() {
     if (game.isGameOver()) {
         endGame();
         return;
@@ -54,9 +127,11 @@ function startPlayerTurn() {
             endGame();
             return;
         }
-        game.log.push(`⏱️ HALBZEIT VORBEI! 2. Halbzeit beginnt!`);
+        game.log.push(`─────────────────────────`);
+        game.log.push(`⏱️ HALBZEIT VORBEI!`);
+        game.log.push(`2. HALBZEIT BEGINNT!`);
         updateUI();
-        setTimeout(() => startPlayerTurn(), 2000);
+        setTimeout(() => startPlayerAttack(), 2000);
         return;
     }
     
@@ -64,22 +139,22 @@ function startPlayerTurn() {
     const attackers = game.getAvailableAttackers(true);
     
     if (attackers.length === 0) {
-        game.log.push(`❌ Keine Angreifer mehr - Angriff übergangen`);
+        game.log.push(`❌ Keine Angreifer mehr - übergeben`);
         game.updateAttackCount(true);
         updateUI();
-        setTimeout(() => startAITurn(), 1500);
+        setTimeout(() => startAIAttack(), 1500);
         return;
     }
     
     const html = `
         <div class="game-state">
             <h3>⚽ Dein Angriff (${game.attacksThisHalf.player + 1}/3)</h3>
-            <p><strong>Wähle einen Offensivspieler:</strong></p>
+            <p><strong>1. Wähle Angreifer:</strong></p>
             <div class="card-selection">
                 ${attackers.map((p, i) => `
-                    <div class="tactic-card" onclick="selectAttacker(${i})" style="cursor: pointer; background: #e3f2fd; border: 2px solid #2196F3;">
+                    <div class="tactic-card" onclick="playerSelectAttacker(${i})" style="cursor: pointer; background: #e3f2fd; border: 2px solid #2196F3;">
                         <strong>${p.name}</strong><br>
-                        <small>ATT: ${p.attack}</small>
+                        <small>${p.role} | ATT: <strong>${p.attack}</strong></small>
                     </div>
                 `).join('')}
             </div>
@@ -89,27 +164,28 @@ function startPlayerTurn() {
     document.getElementById('actionArea').innerHTML = '';
 }
 
-function selectAttacker(index) {
+function playerSelectAttacker(index) {
     const attackers = game.getAvailableAttackers(true);
     game.selectedAttacker = attackers[index];
-    
     game.log.push(`👤 Angreifer: ${game.selectedAttacker.name}`);
     updateUI();
     
-    showAttackTacticSelection();
+    showPlayerAttackTactic();
 }
 
-function showAttackTacticSelection() {
-    document.getElementById('currentPhase').textContent = '🎯 Taktik wählen';
+function showPlayerAttackTactic() {
+    document.getElementById('currentPhase').textContent = '🎯 Angriffstaktik';
     const tactics = game.getAvailableAttackTactics(true);
     
     const html = `
         <div class="game-state">
-            <h3>🎯 Wähle deine Angriffstaktik</h3>
+            <h3>🎯 2. Wähle Angriffstaktik</h3>
             <div class="card-selection">
                 ${tactics.map((t, i) => `
-                    <div class="tactic-card" onclick="selectAttackTactic(${i})" style="cursor: pointer; background: #fff3e0; border: 2px solid #FF9800;">
-                        <strong>${t.name}</strong>
+                    <div class="tactic-card" onclick="playerSelectAttackTactic(${i})" style="cursor: pointer; background: #fff3e0; border: 2px solid #FF9800; padding: 15px;">
+                        <strong>${t.name}</strong><br>
+                        <small>✅ Stark: ${t.strong.join(', ')}</small><br>
+                        <small style="color: red;">❌ Schwach: ${t.weak.join(', ')}</small>
                     </div>
                 `).join('')}
             </div>
@@ -118,10 +194,9 @@ function showAttackTacticSelection() {
     document.getElementById('gameState').innerHTML = html;
 }
 
-function selectAttackTactic(index) {
+function playerSelectAttackTactic(index) {
     const tactics = game.getAvailableAttackTactics(true);
     game.selectedAttackTactic = tactics[index];
-    
     game.log.push(`🎯 Taktik: ${game.selectedAttackTactic.name}`);
     updateUI();
     
@@ -147,29 +222,30 @@ function playFieldDuel() {
         game.selectedDefenseTactic
     );
     
+    const bonusText = result.bonus > 0 ? `+${result.bonus}` : result.bonus < 0 ? `${result.bonus}` : '0';
+    
     const html = `
         <div class="game-state">
             <h3>⚔️ FELDDUELL</h3>
             <div class="player-info">
                 <strong>Angreifer:</strong> ${result.attacker.name}<br>
-                Taktik: ${result.attackTactic}<br>
-                <strong>Wert: ${result.attackValue}</strong>
+                ATT: ${result.attacker.attack} + Taktik-Bonus: ${bonusText}<br>
+                <strong>Gesamtwert: ${result.attackValue}</strong>
             </div>
             <div class="player-info">
                 <strong>Verteidiger:</strong> ${result.defender.name}<br>
-                Taktik: ${result.defenseTactic}<br>
-                <strong>Wert: ${result.defenseValue}</strong>
+                DEF: ${result.defender.defense} + Taktik-Bonus: ${bonusText}<br>
+                <strong>Gesamtwert: ${result.defenseValue}</strong>
             </div>
-            <div style="margin-top: 20px; padding: 20px; background: ${result.isSuccess ? '#c8e6c9' : '#ffcdd2'}; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.2em;">
+            <div style="margin-top: 20px; padding: 20px; background: ${result.isSuccess ? '#c8e6c9' : '#ffcdd2'}; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.3em;">
                 ${result.isSuccess ? '✅ ANGRIFF ERFOLGREICH!' : '❌ ABGEWEHRT!'}
             </div>
         </div>
     `;
     document.getElementById('gameState').innerHTML = html;
-    document.getElementById('actionArea').innerHTML = '';
     
     if (result.isSuccess) {
-        game.log.push(`✅ Angriff durchgebrochen!`);
+        game.log.push(`✅ Angriff erfolgreich!`);
         updateUI();
         
         setTimeout(() => {
@@ -182,24 +258,23 @@ function playFieldDuel() {
         updateUI();
         
         setTimeout(() => {
-            startAITurn();
+            startAIAttack();
         }, 2500);
     }
 }
 
 function playGoalChance(isPlayer) {
-    document.getElementById('currentPhase').textContent = isPlayer ? '🎯 Deine Torchance' : '🤖 Computer Torchance';
-    
     const goalChance = game.resolveGoalChance();
     
     if (isPlayer) {
+        document.getElementById('currentPhase').textContent = '🎯 Strafraum-Drama';
         const html = `
             <div class="game-state">
-                <h3>🎯 STRAFRAUM-DRAMA</h3>
+                <h3>🎯 STRAFRAUM-DRAMA (Torchance)</h3>
                 <p><strong>Wähle eine Momentum-Karte:</strong></p>
                 <div class="card-selection">
                     ${goalChance.playerCards.map((card, i) => `
-                        <div class="momentum-card" onclick="selectPlayerMomentum(${i})" style="cursor: pointer;">
+                        <div class="momentum-card" onclick="playerSelectMomentum(${i})" style="cursor: pointer; padding: 15px;">
                             <strong>${card.name}</strong><br>
                             <small>${card.value > 0 ? '+' : ''}${card.value}</small>
                         </div>
@@ -211,12 +286,12 @@ function playGoalChance(isPlayer) {
         window.currentGoalChance = goalChance;
     } else {
         setTimeout(() => {
-            resolveAIGoalChance(goalChance);
+            resolveAIGoal(goalChance);
         }, 1500);
     }
 }
 
-function selectPlayerMomentum(index) {
+function playerSelectMomentum(index) {
     const goalChance = window.currentGoalChance;
     const playerCard = goalChance.playerCards[index];
     const aiIndex = Math.floor(Math.random() * goalChance.aiCards.length);
@@ -236,13 +311,13 @@ function selectPlayerMomentum(index) {
             <h3>🥅 SCHUSSVERSUCH</h3>
             <div class="player-info">
                 <strong>Dein Schuss:</strong> ${game.selectedAttacker.name}<br>
-                Momentum: ${playerCard.name}<br>
-                <strong>Wert: ${playerValue}</strong>
+                ATT: ${game.selectedAttacker.attack} + Momentum (${playerCard.name}): ${playerCard.value}<br>
+                <strong>Gesamtwert: ${playerValue}</strong>
             </div>
             <div class="player-info">
                 <strong>Torwart:</strong> ${game.selectedDefender.name}<br>
-                Gegner Momentum: ${aiCard.name}<br>
-                <strong>Wert: ${defenderValue}</strong>
+                DEF: ${game.selectedDefender.defense} + Gegner Momentum (${aiCard.name}): ${aiCard.value}<br>
+                <strong>Gesamtwert: ${defenderValue}</strong>
             </div>
             <div style="margin-top: 20px; padding: 20px; background: ${isGoal ? '#c8e6c9' : '#ffcdd2'}; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.4em;">
                 ${isGoal ? '⚽⚽⚽ TOOOOR! ⚽⚽⚽' : '🧤 GEHALTEN!'}
@@ -263,11 +338,13 @@ function selectPlayerMomentum(index) {
     updateUI();
     
     setTimeout(() => {
-        startAITurn();
+        startAIAttack();
     }, 3000);
 }
 
-function startAITurn() {
+// ============ AI ATTACK ============
+
+function startAIAttack() {
     if (game.isGameOver()) {
         endGame();
         return;
@@ -278,13 +355,15 @@ function startAITurn() {
             endGame();
             return;
         }
-        game.log.push(`⏱️ HALBZEIT VORBEI! 2. Halbzeit beginnt!`);
+        game.log.push(`─────────────────────────`);
+        game.log.push(`⏱️ HALBZEIT VORBEI!`);
+        game.log.push(`2. HALBZEIT BEGINNT!`);
         updateUI();
-        setTimeout(() => startPlayerTurn(), 2000);
+        setTimeout(() => startPlayerAttack(), 2000);
         return;
     }
     
-    document.getElementById('currentPhase').textContent = '🤖 Computer spielt...';
+    document.getElementById('currentPhase').textContent = '🤖 Computer greift an...';
     
     const attackers = game.getAvailableAttackers(false);
     
@@ -292,7 +371,7 @@ function startAITurn() {
         game.log.push(`❌ Computer hat keine Angreifer - übergeben`);
         game.updateAttackCount(false);
         updateUI();
-        setTimeout(() => startPlayerTurn(), 1500);
+        setTimeout(() => startPlayerAttack(), 1500);
         return;
     }
     
@@ -314,7 +393,7 @@ function startAITurn() {
         );
         
         if (result.isSuccess) {
-            game.log.push(`✅ Computer durchgebrochen!`);
+            game.log.push(`✅ Computer erfolgreich!`);
             updateUI();
             
             setTimeout(() => {
@@ -327,13 +406,13 @@ function startAITurn() {
             updateUI();
             
             setTimeout(() => {
-                startPlayerTurn();
+                startPlayerAttack();
             }, 1500);
         }
     }, 2000);
 }
 
-function resolveAIGoalChance(goalChance) {
+function resolveAIGoal(goalChance) {
     const playerIndex = Math.floor(Math.random() * goalChance.playerCards.length);
     const aiIndex = Math.floor(Math.random() * goalChance.aiCards.length);
     
@@ -354,13 +433,13 @@ function resolveAIGoalChance(goalChance) {
             <h3>🥅 COMPUTER SCHUSSVERSUCH</h3>
             <div class="player-info">
                 <strong>Computer Schuss:</strong> ${game.selectedAttacker.name}<br>
-                Momentum: ${aiCard.name}<br>
-                <strong>Wert: ${aiValue}</strong>
+                ATT: ${game.selectedAttacker.attack} + Momentum (${aiCard.name}): ${aiCard.value}<br>
+                <strong>Gesamtwert: ${aiValue}</strong>
             </div>
             <div class="player-info">
                 <strong>Torwart:</strong> ${game.selectedDefender.name}<br>
-                Gegner Momentum: ${playerCard.name}<br>
-                <strong>Wert: ${playerValue}</strong>
+                DEF: ${game.selectedDefender.defense} + Gegner Momentum (${playerCard.name}): ${playerCard.value}<br>
+                <strong>Gesamtwert: ${playerValue}</strong>
             </div>
             <div style="margin-top: 20px; padding: 20px; background: ${isGoal ? '#ffcdd2' : '#c8e6c9'}; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.4em;">
                 ${isGoal ? '⚽ COMPUTER TOOOR!' : '🧤 DU HIELTEST!'}
@@ -381,9 +460,11 @@ function resolveAIGoalChance(goalChance) {
     updateUI();
     
     setTimeout(() => {
-        startPlayerTurn();
+        startPlayerAttack();
     }, 3000);
 }
+
+// ============ GAME END ============
 
 function endGame() {
     document.getElementById('gameBoard').style.display = 'none';
@@ -414,6 +495,12 @@ function endGame() {
             <strong>Trainer:</strong><br>
             Du: ${game.playerCoach}<br>
             Computer: ${game.aiCoach}
+        </div>
+        <div style="font-size: 0.95em; margin: 20px 0; color: #999;">
+            <strong>Dein Team:</strong><br>
+            ${game.playerTeam.iv.map(p => p.name).join(', ')} (IV)<br>
+            ${game.playerTeam.zm.name} (ZM)<br>
+            ${game.playerTeam.st.map(p => p.name).join(', ')} (ST)
         </div>
     `;
 }
