@@ -1,4 +1,4 @@
-// Game Engine for SPIELZUG - FIXED VERSION
+// Game Engine for SPIELZUG - COMPLETE REWRITE
 
 class SPIELZUGGame {
     constructor(mode) {
@@ -9,67 +9,47 @@ class SPIELZUGGame {
         this.attacksThisHalf = { player: 0, ai: 0 };
         this.maxAttacksPerHalf = 3;
         
-        // Draft teams
-        this.playerTeam = this.draftTeam();
-        this.aiTeam = this.draftTeam();
+        // Draft phase
+        this.draftPhase = true;
+        this.draftOrder = []; // 'ai', 'player', 'player', 'ai', 'ai', 'player'
+        this.draftIndex = 0;
+        this.availablePlayers = this.getAllPlayers();
         
-        // Select coaches
+        // Teams after draft
+        this.playerTeam = null;
+        this.aiTeam = null;
+        
+        // Coaches
         this.playerCoach = getRandomCoach();
         this.aiCoach = getRandomCoach();
         
         // Initialize momentum deck
         this.momentumDeck = shuffleArray(buildMomentumDeck());
         
-        // Tactic hands (5 attack, 5 defense)
+        // Tactic hands
         this.playerTactics = this.initializeTactics();
         this.aiTactics = this.initializeTactics();
         
         // Game log
         this.log = [];
         
-        // Game state
-        this.gameState = 'selecting_attacker';
+        // Current state
         this.selectedAttacker = null;
         this.selectedDefender = null;
         this.selectedAttackTactic = null;
         this.selectedDefenseTactic = null;
-        this.isPlayerTurn = true;
         
-        // Track who has played this half
+        // Track who has played
         this.playersPlayedThisHalf = new Set();
         this.aiPlayersPlayedThisHalf = new Set();
     }
     
-    draftTeam() {
-        const team = {
-            tw: null,
-            iv: [],
-            zm: null,
-            st: []
-        };
-        
-        // Torwart (placeholder)
-        team.tw = { name: 'Keeper', attack: 1, defense: 5, role: 'TW', id: 'tw-1' };
-        
-        // 2 Innenverteidiger
-        const ivPool = shuffleArray(PLAYERS.iv);
-        team.iv = [
-            { ...ivPool[0], role: 'IV', id: 'iv-1' },
-            { ...ivPool[1], role: 'IV', id: 'iv-2' }
-        ];
-        
-        // 1 Zentrales Mittelfeld
-        const zmPool = shuffleArray(PLAYERS.zm);
-        team.zm = { ...zmPool[0], role: 'ZM', id: 'zm-1' };
-        
-        // 2 Stürmer
-        const stPool = shuffleArray(PLAYERS.st);
-        team.st = [
-            { ...stPool[0], role: 'ST', id: 'st-1' },
-            { ...stPool[1], role: 'ST', id: 'st-2' }
-        ];
-        
-        return team;
+    getAllPlayers() {
+        const all = [];
+        PLAYERS.iv.forEach((p, i) => all.push({ ...p, role: 'IV', id: `iv-${i}` }));
+        PLAYERS.zm.forEach((p, i) => all.push({ ...p, role: 'ZM', id: `zm-${i}` }));
+        PLAYERS.st.forEach((p, i) => all.push({ ...p, role: 'ST', id: `st-${i}` }));
+        return shuffleArray(all);
     }
     
     initializeTactics() {
@@ -89,32 +69,76 @@ class SPIELZUGGame {
         return shuffleArray(tactics);
     }
     
-    // Get available attackers (ZM und ST die noch nicht gespielt haben)
+    initializeDraft() {
+        // Snake draft: AI, Player, Player, AI, AI, Player
+        this.draftOrder = ['ai', 'player', 'player', 'ai', 'ai', 'player'];
+        this.draftIndex = 0;
+        this.playerTeam = { tw: null, iv: [], zm: null, st: [] };
+        this.aiTeam = { tw: null, iv: [], zm: null, st: [] };
+        // Torwarte werden automatisch vergeben
+        this.playerTeam.tw = { name: 'Keeper', attack: 1, defense: 5, role: 'TW', id: 'tw-player' };
+        this.aiTeam.tw = { name: 'Keeper', attack: 1, defense: 5, role: 'TW', id: 'tw-ai' };
+    }
+    
+    getDraftCurrentPlayer() {
+        if (this.draftIndex >= this.draftOrder.length) return null;
+        return this.draftOrder[this.draftIndex];
+    }
+    
+    selectPlayerInDraft(playerIndex) {
+        const player = this.availablePlayers[playerIndex];
+        const currentTurn = this.getDraftCurrentPlayer();
+        
+        if (currentTurn === 'player') {
+            if (this.playerTeam.iv.length < 2) {
+                this.playerTeam.iv.push(player);
+            } else if (!this.playerTeam.zm) {
+                this.playerTeam.zm = player;
+            } else if (this.playerTeam.st.length < 2) {
+                this.playerTeam.st.push(player);
+            }
+        } else if (currentTurn === 'ai') {
+            if (this.aiTeam.iv.length < 2) {
+                this.aiTeam.iv.push(player);
+            } else if (!this.aiTeam.zm) {
+                this.aiTeam.zm = player;
+            } else if (this.aiTeam.st.length < 2) {
+                this.aiTeam.st.push(player);
+            }
+        }
+        
+        // Remove from available
+        this.availablePlayers.splice(playerIndex, 1);
+        this.draftIndex++;
+        
+        return this.draftIndex >= this.draftOrder.length;
+    }
+    
     getAvailableAttackers(isPlayer) {
         const team = isPlayer ? this.playerTeam : this.aiTeam;
         const playedSet = isPlayer ? this.playersPlayedThisHalf : this.aiPlayersPlayedThisHalf;
         const attackers = [];
         
-        if (!playedSet.has(team.zm.id)) {
+        if (team.zm && !playedSet.has(team.zm.id)) {
             attackers.push(team.zm);
         }
         
-        team.st.forEach(st => {
-            if (!playedSet.has(st.id)) {
-                attackers.push(st);
-            }
-        });
+        if (team.st) {
+            team.st.forEach(st => {
+                if (!playedSet.has(st.id)) {
+                    attackers.push(st);
+                }
+            });
+        }
         
         return attackers;
     }
     
-    // Get available defenders (IV)
     getAvailableDefenders(isPlayer) {
         const team = isPlayer ? this.playerTeam : this.aiTeam;
-        return team.iv;
+        return team.iv || [];
     }
     
-    // Get available tactic cards
     getAvailableAttackTactics(isPlayer) {
         const tactics = isPlayer ? this.playerTactics : this.aiTactics;
         return tactics.filter(t => t.type === 'attack');
@@ -125,12 +149,10 @@ class SPIELZUGGame {
         return tactics.filter(t => t.type === 'defense');
     }
     
-    // Resolve field duel
     resolveFieldDuel(attacker, attackTactic, defender, defenseTactic) {
         let attackValue = attacker.attack;
         let defenseValue = defender.defense;
         
-        // Apply tactic bonus
         const bonus = getTacticBonus(attackTactic.name, defenseTactic.name);
         if (bonus > 0) {
             attackValue += bonus;
@@ -154,13 +176,13 @@ class SPIELZUGGame {
             defenseValue,
             attackTactic: attackTactic.name,
             defenseTactic: defenseTactic.name,
+            bonus,
             isSuccess,
             attacker,
             defender
         };
     }
     
-    // Resolve goal chance
     resolveGoalChance() {
         const deck = this.momentumDeck;
         
@@ -168,18 +190,12 @@ class SPIELZUGGame {
             this.momentumDeck = shuffleArray(buildMomentumDeck());
         }
         
-        const playerCard1 = deck.pop();
-        const playerCard2 = deck.pop();
-        const aiCard1 = deck.pop();
-        const aiCard2 = deck.pop();
-        
         return {
-            playerCards: [playerCard1, playerCard2],
-            aiCards: [aiCard1, aiCard2]
+            playerCards: [deck.pop(), deck.pop()],
+            aiCards: [deck.pop(), deck.pop()]
         };
     }
     
-    // AI decision
     makeAIDecision(phase) {
         if (phase === 'attacker') {
             const available = this.getAvailableAttackers(false);
@@ -197,7 +213,6 @@ class SPIELZUGGame {
         return null;
     }
     
-    // Mark player as used this half
     markPlayerAsUsed(player, isPlayer) {
         if (isPlayer) {
             this.playersPlayedThisHalf.add(player.id);
@@ -206,7 +221,6 @@ class SPIELZUGGame {
         }
     }
     
-    // Update attack count
     updateAttackCount(isPlayer) {
         if (isPlayer) {
             this.attacksThisHalf.player++;
@@ -215,13 +229,11 @@ class SPIELZUGGame {
         }
     }
     
-    // Check if half is over
     isHalfOver() {
         return this.attacksThisHalf.player >= this.maxAttacksPerHalf && 
                this.attacksThisHalf.ai >= this.maxAttacksPerHalf;
     }
     
-    // Start next half
     startNextHalf() {
         if (this.currentHalf === 1) {
             this.currentHalf = 2;
@@ -229,7 +241,6 @@ class SPIELZUGGame {
             this.playersPlayedThisHalf = new Set();
             this.aiPlayersPlayedThisHalf = new Set();
             
-            // Restore tactic cards
             this.playerTactics = this.initializeTactics();
             this.aiTactics = this.initializeTactics();
             
@@ -238,12 +249,10 @@ class SPIELZUGGame {
         return false;
     }
     
-    // Check game over
     isGameOver() {
         return this.currentHalf > 1 && this.isHalfOver();
     }
     
-    // Get winner
     getWinner() {
         if (this.playerScore > this.aiScore) return 'player';
         if (this.aiScore > this.playerScore) return 'ai';
