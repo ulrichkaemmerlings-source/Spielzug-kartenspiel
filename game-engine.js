@@ -1,4 +1,4 @@
-// Game Engine for SPIELZUG - COMPLETE IMPLEMENTATION
+// Game Engine for SPIELZUG
 
 class SPIELZUGGame {
     constructor(mode) {
@@ -6,49 +6,63 @@ class SPIELZUGGame {
         this.playerScore = 0;
         this.aiScore = 0;
         this.currentHalf = 1;
+        // Angriffe: abwechselnd, je 3 pro Halbzeit
         this.attacksThisHalf = { player: 0, ai: 0 };
         this.maxAttacksPerHalf = 3;
-        
-        // Draft phase
+
+        // Draft
         this.draftPhase = true;
-        this.draftOrder = ['player', 'ai', 'ai', 'player', 'player', 'ai']; // FIXED: Correct snake draft
+        // Korrekte Schlangen-Reihenfolge: A-B, B-A-A-B => player first
+        this.draftOrder = ['player', 'ai', 'ai', 'player', 'player', 'ai'];
         this.draftIndex = 0;
         this.availablePlayers = this.getAllPlayers();
-        
-        // Teams after draft
+
         this.playerTeam = null;
         this.aiTeam = null;
-        
-        // Coaches
+
         this.playerCoach = getRandomCoach();
         this.aiCoach = getRandomCoach();
-        this.playerCoachState = {}; // Track coach-specific states
-        this.aiCoachState = {};
-        
-        // Initialize momentum deck
+
         this.momentumDeck = shuffleArray(buildMomentumDeck());
-        
-        // Tactic hands
-        this.playerTactics = this.initializeTactics();
-        this.aiTactics = this.initializeTactics();
-        
-        // Game log
+
+        // Taktik-Hände: je 5 Angriff + 5 Abwehr
+        this.playerTactics = this.buildTacticHand();
+        this.aiTactics = this.buildTacticHand();
+
         this.log = [];
-        
-        // Current state
+
+        // Aktuell gewählte Karten
         this.selectedAttacker = null;
         this.selectedDefender = null;
         this.selectedAttackTactic = null;
         this.selectedDefenseTactic = null;
-        this.lastAttackTactic = null; // For special abilities like header_bonus
-        
-        // Attack order - should alternate
-        this.attackOrder = []; // Will be filled with 'player' and 'ai' alternating
-        this.currentAttackIndex = 0;
-        this.playerAttackSequence = [];
-        this.aiAttackSequence = [];
+        this.lastWinningAttackTactic = null; // für Kopfballungeheuer
+
+        // Erschöpfte Spieler (haben diesen Halb bereits angegriffen)
+        this.playersPlayedThisHalf = new Set();
+        this.aiPlayersPlayedThisHalf = new Set();
+
+        // Trainer-Status-Flags
+        this.playerCoachState = {
+            taktikFuchsNoBonusNextAttack: false,
+            theoretikerPeekUsedThisHalf: false,
+            dinosaurierFirstAttackDone: false,
+            fanatikerGoalBonusActive: false,
+            floodlightPendingFor: null, // 'player' oder 'ai'
+            secondBallAvailable: false,
+            favoritePlayer: null, // für Präsidenten-Kumpel
+        };
+        this.aiCoachState = {
+            taktikFuchsNoBonusNextAttack: false,
+            theoretikerPeekUsedThisHalf: false,
+            dinosaurierFirstAttackDone: false,
+            fanatikerGoalBonusActive: false,
+            floodlightPendingFor: null,
+            secondBallAvailable: false,
+            favoritePlayer: null,
+        };
     }
-    
+
     getAllPlayers() {
         const all = [];
         PLAYERS.iv.forEach((p, i) => all.push({ ...p, role: 'IV', id: `iv-${i}` }));
@@ -56,311 +70,336 @@ class SPIELZUGGame {
         PLAYERS.st.forEach((p, i) => all.push({ ...p, role: 'ST', id: `st-${i}` }));
         return shuffleArray(all);
     }
-    
-    initializeTactics() {
-        const tactics = [];
-        for (let i = 0; i < 5; i++) {
-            tactics.push({
-                ...TACTICS.attack[i],
-                type: 'attack',
-                id: `attack-${i}`
-            });
-            tactics.push({
-                ...TACTICS.defense[i],
-                type: 'defense',
-                id: `defense-${i}`
-            });
-        }
-        return shuffleArray(tactics);
+
+    buildTacticHand() {
+        const hand = [];
+        TACTICS.attack.forEach((t, i) => hand.push({ ...t, type: 'attack', id: `attack-${i}` }));
+        TACTICS.defense.forEach((t, i) => hand.push({ ...t, type: 'defense', id: `defense-${i}` }));
+        return hand;
     }
-    
+
     initializeDraft() {
         this.draftIndex = 0;
-        this.playerTeam = { tw: null, iv: [], zm: null, st: [] };
-        this.aiTeam = { tw: null, iv: [], zm: null, st: [] };
-        this.playerTeam.tw = { name: 'Keeper', attack: 1, defense: 5, role: 'TW', id: 'tw-player', special: null };
-        this.aiTeam.tw = { name: 'Keeper', attack: 1, defense: 5, role: 'TW', id: 'tw-ai', special: null };
+        this.playerTeam = {
+            tw: { name: 'Torwart', attack: 1, defense: 5, role: 'TW', id: 'tw-player' },
+            iv: [], zm: null, st: []
+        };
+        this.aiTeam = {
+            tw: { name: 'Torwart', attack: 1, defense: 5, role: 'TW', id: 'tw-ai' },
+            iv: [], zm: null, st: []
+        };
     }
-    
+
+    applyCoachPassives() {
+        // Offensiv-Fanatiker: IVs dauerhaft -1 DEF
+        if (COACHES[this.playerCoach].special === 'offensive_fanatic') {
+            this.playerTeam.iv.forEach(iv => { iv.defense = Math.max(0, iv.defense - 1); });
+        }
+        if (COACHES[this.aiCoach].special === 'offensive_fanatic') {
+            this.aiTeam.iv.forEach(iv => { iv.defense = Math.max(0, iv.defense - 1); });
+        }
+
+        // Präsidenten-Kumpel: Lieblingsspieler wählen (höchster ATT-Wert)
+        if (COACHES[this.playerCoach].special === 'praesidenten_kumpel') {
+            const allP = [...this.playerTeam.iv, this.playerTeam.zm, ...this.playerTeam.st].filter(Boolean);
+            const fav = allP.reduce((a, b) => (a.attack + a.defense > b.attack + b.defense ? a : b));
+            fav.attack += 2; fav.defense += 2;
+            this.playerCoachState.favoritePlayer = fav.id;
+            this.log.push(`⭐ Lieblingsspieler (Präsidenten-Kumpel): ${fav.name}`);
+        }
+        if (COACHES[this.aiCoach].special === 'praesidenten_kumpel') {
+            const allA = [...this.aiTeam.iv, this.aiTeam.zm, ...this.aiTeam.st].filter(Boolean);
+            const fav = allA.reduce((a, b) => (a.attack + a.defense > b.attack + b.defense ? a : b));
+            fav.attack += 2; fav.defense += 2;
+            this.aiCoachState.favoritePlayer = fav.id;
+        }
+
+        // Medizinball-Schleifer: 4 Angriffe pro Halbzeit statt 3
+        if (COACHES[this.playerCoach].special === 'medizinball') {
+            this.maxAttacksPerHalfPlayer = 4;
+        } else {
+            this.maxAttacksPerHalfPlayer = 3;
+        }
+        if (COACHES[this.aiCoach].special === 'medizinball') {
+            this.maxAttacksPerHalfAI = 4;
+        } else {
+            this.maxAttacksPerHalfAI = 3;
+        }
+    }
+
     getDraftCurrentPlayer() {
         if (this.draftIndex >= this.draftOrder.length) return null;
         return this.draftOrder[this.draftIndex];
     }
-    
+
     selectPlayerInDraft(playerIndex) {
-        const player = JSON.parse(JSON.stringify(this.availablePlayers[playerIndex]));
+        const player = this.availablePlayers[playerIndex];
         const currentTurn = this.getDraftCurrentPlayer();
-        
-        if (currentTurn === 'player') {
-            if (this.playerTeam.iv.length < 2) {
-                this.playerTeam.iv.push(player);
-            } else if (!this.playerTeam.zm) {
-                this.playerTeam.zm = player;
-            } else if (this.playerTeam.st.length < 2) {
-                this.playerTeam.st.push(player);
-            }
-        } else if (currentTurn === 'ai') {
-            if (this.aiTeam.iv.length < 2) {
-                this.aiTeam.iv.push(player);
-            } else if (!this.aiTeam.zm) {
-                this.aiTeam.zm = player;
-            } else if (this.aiTeam.st.length < 2) {
-                this.aiTeam.st.push(player);
-            }
-        }
-        
+
+        const assignTo = (team) => {
+            if (player.role === 'IV' && team.iv.length < 2) team.iv.push(player);
+            else if (player.role === 'ZM' && !team.zm) team.zm = player;
+            else if (player.role === 'ST' && team.st.length < 2) team.st.push(player);
+            // Fallback: passt überall rein wenn Slot frei
+            else if (team.iv.length < 2) { player.role = 'IV'; team.iv.push(player); }
+            else if (!team.zm) { player.role = 'ZM'; team.zm = player; }
+            else if (team.st.length < 2) { player.role = 'ST'; team.st.push(player); }
+        };
+
+        if (currentTurn === 'player') assignTo(this.playerTeam);
+        else if (currentTurn === 'ai') assignTo(this.aiTeam);
+
         this.availablePlayers.splice(playerIndex, 1);
         this.draftIndex++;
-        
-        // Apply coach effects to team when draft is complete
-        if (this.draftIndex >= this.draftOrder.length) {
-            this.applyCoachEffects();
-            this.initializeAttackOrder();
-        }
-        
         return this.draftIndex >= this.draftOrder.length;
     }
-    
-    applyCoachEffects() {
-        // Offensiv-Fanatiker: IVs have -1 defense
-        if (this.playerCoach === 'Der Offensiv-Fanatiker') {
-            this.playerTeam.iv.forEach(iv => iv.defense -= 1);
-        }
-        if (this.aiCoach === 'Der Offensiv-Fanatiker') {
-            this.aiTeam.iv.forEach(iv => iv.defense -= 1);
-        }
-        
-        // Präsidenten-Kumpel: Choose favorite player with +2 to all
-        if (this.playerCoach === 'Der Präsidenten-Kumpel') {
-            const allPlayers = [...this.playerTeam.iv, this.playerTeam.zm, ...this.playerTeam.st];
-            const favorite = allPlayers[Math.floor(Math.random() * allPlayers.length)];
-            favorite.attack += 2;
-            favorite.defense += 2;
-            this.playerCoachState.favoriteId = favorite.id;
-        }
-        if (this.aiCoach === 'Der Präsidenten-Kumpel') {
-            const allPlayers = [...this.aiTeam.iv, this.aiTeam.zm, ...this.aiTeam.st];
-            const favorite = allPlayers[Math.floor(Math.random() * allPlayers.length)];
-            favorite.attack += 2;
-            favorite.defense += 2;
-            this.aiCoachState.favoriteId = favorite.id;
-        }
+
+    getMaxAttacks(isPlayer) {
+        return isPlayer ? (this.maxAttacksPerHalfPlayer || 3) : (this.maxAttacksPerHalfAI || 3);
     }
-    
-    initializeAttackOrder() {
-        // Create attack sequence: player, ai, player, ai, player, ai
-        this.attackOrder = [];
-        for (let i = 0; i < 3; i++) {
-            this.attackOrder.push('player');
-            this.attackOrder.push('ai');
-        }
-        this.currentAttackIndex = 0;
-        
-        // Shuffle attack order for each player (3 attacks per player)
-        this.playerAttackSequence = [
-            this.playerTeam.zm,
-            this.playerTeam.st[0],
-            this.playerTeam.st[1]
-        ];
-        this.aiAttackSequence = [
-            this.aiTeam.zm,
-            this.aiTeam.st[0],
-            this.aiTeam.st[1]
-        ];
+
+    getAvailableAttackers(isPlayer) {
+        const team = isPlayer ? this.playerTeam : this.aiTeam;
+        const playedSet = isPlayer ? this.playersPlayedThisHalf : this.aiPlayersPlayedThisHalf;
+        const attackers = [];
+        if (team.zm && !playedSet.has(team.zm.id)) attackers.push(team.zm);
+        team.st.forEach(st => { if (!playedSet.has(st.id)) attackers.push(st); });
+        return attackers;
     }
-    
-    getNextAttacker() {
-        if (this.currentAttackIndex >= this.attackOrder.length) return null;
-        const side = this.attackOrder[this.currentAttackIndex];
-        
-        if (side === 'player') {
-            return this.playerAttackSequence[this.attacksThisHalf.player];
-        } else {
-            return this.aiAttackSequence[this.attacksThisHalf.ai];
-        }
-    }
-    
+
     getAvailableDefenders(isPlayer) {
         const team = isPlayer ? this.playerTeam : this.aiTeam;
         return team.iv || [];
     }
-    
+
     getAvailableAttackTactics(isPlayer) {
-        let tactics = isPlayer ? this.playerTactics : this.aiTactics;
-        tactics = tactics.filter(t => t.type === 'attack');
-        
-        // Defensiv-Guru: Cannot use Distanzschuss & Flügelspiel if winning
+        let tactics = [...TACTICS.attack];
         const coach = isPlayer ? this.playerCoach : this.aiCoach;
-        const score = isPlayer ? [this.playerScore, this.aiScore] : [this.aiScore, this.playerScore];
-        
-        if (coach === 'Der Defensiv-Guru' && score[0] > score[1]) {
+        const score = isPlayer ? this.playerScore : this.aiScore;
+        const oppScore = isPlayer ? this.aiScore : this.playerScore;
+
+        // Defensiv-Guru: bei eigener Führung kein Distanzschuss/Flügelspiel
+        if (COACHES[coach].special === 'defensive_guru' && score > oppScore) {
             tactics = tactics.filter(t => t.name !== 'Distanzschuss' && t.name !== 'Flügelspiel');
         }
-        
         return tactics;
     }
-    
+
     getAvailableDefenseTactics(isPlayer) {
-        const tactics = isPlayer ? this.playerTactics : this.aiTactics;
-        return tactics.filter(t => t.type === 'defense');
+        return [...TACTICS.defense];
     }
-    
-    resolveFieldDuel(attacker, attackTactic, defender, defenseTactic) {
+
+    // Hauptkampf-Auflösung
+    resolveFieldDuel(attacker, attackTactic, defender, defenseTactic, isPlayerAttacking) {
+        const attackerCoach = isPlayerAttacking ? this.playerCoach : this.aiCoach;
+        const defenderCoach = isPlayerAttacking ? this.aiCoach : this.playerCoach;
+        const attackerCoachState = isPlayerAttacking ? this.playerCoachState : this.aiCoachState;
+
         let attackValue = attacker.attack;
         let defenseValue = defender.defense;
-        let bonusBreakdown = { attack: 0, defense: 0 };
-        
-        // Base tactic bonus
+        let bonusLog = [];
+
+        // Taktik-Konter-Bonus (korrekte Berechnung)
         const tacticBonus = getTacticBonus(attackTactic.name, defenseTactic.name);
-        
+        let attackerGetsBonus = false;
+        let defenderGetsBonus = false;
+
         if (tacticBonus > 0) {
-            attackValue += tacticBonus;
-            bonusBreakdown.attack += tacticBonus;
+            // Prüfen ob Bonus blockiert (Taktik-Fuchs nach Pressing-Niederlage)
+            if (COACHES[attackerCoach].special === 'taktik_fuchs' && attackerCoachState.taktikFuchsNoBonusNextAttack) {
+                bonusLog.push('⚠️ Taktik-Fuchs: Kein Bonus (Strafe aktiv)');
+                attackerCoachState.taktikFuchsNoBonusNextAttack = false;
+            } else {
+                attackValue += 2;
+                attackerGetsBonus = true;
+                bonusLog.push(`🎯 Konter-Bonus: ${attacker.name} +2`);
+            }
         } else if (tacticBonus < 0) {
-            defenseValue += 2; // Defender gets +2 (fixed double negative)
-            bonusBreakdown.defense += 2;
+            defenseValue += 2;
+            defenderGetsBonus = true;
+            bonusLog.push(`🛡️ Konter-Bonus: ${defender.name} +2`);
         }
-        
-        // Apply player special abilities
-        // Defender specials
-        if (defender.special === 'dribbling_counter' && attackTactic.name === 'Dribbling') {
-            defenseValue += 1;
-            bonusBreakdown.defense += 1;
+
+        // Sture Dinosaurier: Kopfball-ST ignoriert negativen Taktik-Effekt
+        if (defenderGetsBonus && COACHES[attackerCoach].special === 'dinosaurier'
+            && attacker.special === 'header_bonus'
+            && (attackTactic.name === 'Flügelspiel' || attackTactic.name === 'Steilpass')) {
+            defenseValue -= 2;
+            bonusLog.push(`🦕 Dinosaurier: Negativer Taktik-Effekt ignoriert`);
         }
-        if (defender.special === 'offside_trap' && defenseTactic.name === 'Abseitsfalle') {
-            defenseValue += 1;
-            bonusBreakdown.defense += 1;
-        }
-        if (defender.special === 'wing_counter' && attackTactic.name === 'Flügelspiel') {
-            defenseValue += 1;
-            bonusBreakdown.defense += 1;
-        }
-        if (defender.special === 'zonal_defense' && defenseTactic.name === 'Raumdeckung') {
-            defenseValue += 1;
-            bonusBreakdown.defense += 1;
-        }
-        if (defender.special === 'pressing_bonus') {
-            if (defenseTactic.name === 'Pressing') {
-                defenseValue += 1;
-                bonusBreakdown.defense += 1;
-            }
-            // But -1 if attacker plays Steilpass
-            if (attackTactic.name === 'Steilpass') {
-                defenseValue -= 1;
-                bonusBreakdown.defense -= 1;
-            }
-        }
-        
-        // Attacker specials
-        if (attacker.special === 'through_pass' && attackTactic.name === 'Steilpass') {
-            attackValue += 1;
-            bonusBreakdown.attack += 1;
-        }
-        if (attacker.special === 'short_pass' && attackTactic.name === 'Kurzpass') {
-            attackValue += 1;
-            bonusBreakdown.attack += 1;
-        }
-        if (attacker.special === 'dribbling' && attackTactic.name === 'Dribbling') {
-            attackValue += 1;
-            bonusBreakdown.attack += 1;
-        }
-        if (attacker.special === 'through_pass_bonus' && attackTactic.name === 'Steilpass') {
-            attackValue += 1;
-            bonusBreakdown.attack += 1;
-        }
-        if (attacker.special === 'long_shot_bonus' && attackTactic.name === 'Distanzschuss') {
-            attackValue += 1;
-            bonusBreakdown.attack += 1;
-        }
-        if (attacker.special === 'short_pass_bonus' && attackTactic.name === 'Kurzpass') {
-            attackValue += 1;
-            bonusBreakdown.attack += 1;
-        }
-        
-        // Trainer effects for Taktik-Fuchs
-        const attackerIsPlayer = attacker.id.startsWith('st-') || attacker.id.startsWith('zm-');
-        const coach = attackerIsPlayer ? this.playerCoach : this.aiCoach;
-        const coachState = attackerIsPlayer ? this.playerCoachState : this.aiCoachState;
-        
-        if (coach === 'Der Taktik-Fuchs' && !coachState.tacticBonusBlocked) {
+
+        // Trainer-Angriffs-Boni
+        if (COACHES[attackerCoach].special === 'taktik_fuchs') {
             if (attackTactic.name === 'Kurzpass' || attackTactic.name === 'Steilpass') {
                 attackValue += 1;
-                bonusBreakdown.attack += 1;
+                bonusLog.push(`🦊 Taktik-Fuchs: +1 für ${attackTactic.name}`);
             }
         }
-        
-        // Defensiv-Guru for defenders
-        if (coach === 'Der Defensiv-Guru') {
+
+        // Spieler-Spezialfähigkeiten Angreifer (Feldduell)
+        switch (attacker.special) {
+            case 'through_pass':
+                if (attackTactic.name === 'Steilpass') { attackValue += 1; bonusLog.push(`⚡ ${attacker.name}: +1 (Steilpass)`); }
+                break;
+            case 'short_pass':
+                if (attackTactic.name === 'Kurzpass') { attackValue += 1; bonusLog.push(`⚡ ${attacker.name}: +1 (Kurzpass)`); }
+                break;
+            case 'dribbling_bonus':
+                if (attackTactic.name === 'Dribbling') { attackValue += 1; bonusLog.push(`⚡ ${attacker.name}: +1 (Dribbling)`); }
+                break;
+            case 'through_pass_bonus':
+                if (attackTactic.name === 'Steilpass') { attackValue += 1; bonusLog.push(`⚡ ${attacker.name}: +1 (Steilpass)`); }
+                break;
+            case 'long_shot_bonus':
+                if (attackTactic.name === 'Distanzschuss') { attackValue += 1; bonusLog.push(`⚡ ${attacker.name}: +1 (Distanzschuss)`); }
+                break;
+            case 'short_pass_bonus':
+                if (attackTactic.name === 'Kurzpass') { attackValue += 1; bonusLog.push(`⚡ ${attacker.name}: +1 (Kurzpass)`); }
+                break;
+        }
+
+        // Spieler-Spezialfähigkeiten Verteidiger (Feldduell)
+        switch (defender.special) {
+            case 'dribbling_counter':
+                if (attackTactic.name === 'Dribbling') { defenseValue += 1; bonusLog.push(`🛡️ ${defender.name}: +1 DEF (Dribbling)`); }
+                break;
+            case 'offside_trap':
+                if (defenseTactic.name === 'Abseitsfalle') { defenseValue += 1; bonusLog.push(`🛡️ ${defender.name}: +1 DEF (Abseitsfalle)`); }
+                break;
+            case 'wing_counter':
+                if (attackTactic.name === 'Flügelspiel') { defenseValue += 1; bonusLog.push(`🛡️ ${defender.name}: +1 DEF (Flügelspiel)`); }
+                break;
+            case 'zonal_defense':
+                if (defenseTactic.name === 'Raumdeckung') { defenseValue += 1; bonusLog.push(`🛡️ ${defender.name}: +1 DEF (Raumdeckung)`); }
+                break;
+            case 'pressing_bonus':
+                if (defenseTactic.name === 'Pressing') { defenseValue += 1; bonusLog.push(`🛡️ ${defender.name}: +1 DEF (Pressing)`); }
+                if (attackTactic.name === 'Steilpass') { defenseValue -= 1; bonusLog.push(`⚠️ ${defender.name}: -1 DEF (Steilpass gegen Abräumer)`); }
+                break;
+        }
+
+        // Defensiv-Guru: +1 für IV bei Tief stehen / Manndeckung
+        if (COACHES[defenderCoach].special === 'defensive_guru') {
             if (defenseTactic.name === 'Tief stehen' || defenseTactic.name === 'Manndeckung') {
                 defenseValue += 1;
-                bonusBreakdown.defense += 1;
+                bonusLog.push(`🧠 Defensiv-Guru: +1 DEF (${defenseTactic.name})`);
             }
         }
-        
-        let isSuccess = false;
-        if (attackValue > defenseValue) {
-            isSuccess = true;
-        } else if (attackValue === defenseValue) {
-            // Reiner Theoretiker doesn't benefit from draw rule
-            if (coach === 'Der Reiner Theoretiker') {
-                isSuccess = false;
-            } else if (GAME_MODES[this.mode].drawRule === 'defense') {
-                isSuccess = false;
-            } else {
-                isSuccess = true;
-            }
+
+        // Taktik-Fuchs Nachteil: Wenn Angriff gegen Pressing verliert
+        if (COACHES[attackerCoach].special === 'taktik_fuchs' && defenseTactic.name === 'Pressing') {
+            // Wird nach dem Duell gesetzt wenn Angriff verliert
         }
-        
-        // Check if Taktik-Fuchs lost against Pressing
-        if (!isSuccess && attackTactic.name !== 'Pressing' && defenseTactic.name === 'Pressing' && coach === 'Der Taktik-Fuchs') {
-            coachState.tacticBonusBlocked = true;
+
+        let isSuccess = attackValue > defenseValue;
+        if (attackValue === defenseValue) {
+            isSuccess = GAME_MODES[this.mode].drawRule === 'attacker';
         }
-        
-        return {
-            attackValue,
-            defenseValue,
-            attackTactic: attackTactic.name,
-            defenseTactic: defenseTactic.name,
-            tacticBonus,
-            bonusBreakdown,
-            isSuccess,
-            attacker,
-            defender
-        };
+
+        // Taktik-Fuchs Nachteil setzen
+        if (!isSuccess && COACHES[attackerCoach].special === 'taktik_fuchs' && defenseTactic.name === 'Pressing') {
+            attackerCoachState.taktikFuchsNoBonusNextAttack = true;
+            bonusLog.push(`🦊 Taktik-Fuchs Nachteil: Nächster Angriff ohne Bonus`);
+        }
+
+        return { attackValue, defenseValue, attackTactic: attackTactic.name, defenseTactic: defenseTactic.name,
+                 tacticBonus, isSuccess, attacker, defender, bonusLog };
     }
-    
-    resolveGoalChance(isPlayer) {
-        const deck = this.momentumDeck;
-        
-        if (deck.length < 4) {
+
+    drawMomentumCards(count) {
+        if (this.momentumDeck.length < count) {
             this.momentumDeck = shuffleArray(buildMomentumDeck());
         }
-        
-        let playerCards = [deck.pop(), deck.pop()];
-        let aiCards = [deck.pop(), deck.pop()];
-        
-        // Mentalitäts-Monster: 3 cards if losing in goal chance
-        const attacker = isPlayer ? this.selectedAttacker : this.selectedAttacker;
-        const coach = isPlayer ? this.playerCoach : this.aiCoach;
-        const myScore = isPlayer ? this.playerScore : this.aiScore;
-        const oppScore = isPlayer ? this.aiScore : this.playerScore;
-        
-        if (coach === 'Das Mentalitäts-Monster' && myScore < oppScore) {
-            if (isPlayer) {
-                playerCards.push(deck.pop());
-            } else {
-                aiCards.push(deck.pop());
-            }
-        }
-        
-        return {
-            playerCards,
-            aiCards
-        };
+        const drawn = [];
+        for (let i = 0; i < count; i++) drawn.push(this.momentumDeck.pop());
+        return drawn;
     }
-    
-    makeAIDecision(phase) {
-        if (phase === 'defender') {
+
+    // Strafraum auflösen – gibt Objekt zurück
+    resolveGoalChance(isPlayerAttacking, selectedAttackerCard, selectedDefenderCard, winningTactic) {
+        const attacker = this.selectedAttacker;
+        const goalkeeper = isPlayerAttacking ? this.aiTeam.tw : this.playerTeam.tw;
+        const attackerCoach = isPlayerAttacking ? this.playerCoach : this.aiCoach;
+        const defenderCoach = isPlayerAttacking ? this.aiCoach : this.playerCoach;
+        const attackerCoachState = isPlayerAttacking ? this.playerCoachState : this.aiCoachState;
+
+        let attackerMomentum = selectedAttackerCard.value;
+        let defenderMomentum = selectedDefenderCard.value;
+
+        // Knipser: negative Momentum -> 0
+        if (attacker.special === 'negative_momentum_to_zero' && attackerMomentum < 0) {
+            attackerMomentum = 0;
+        }
+
+        // Medizinball-Schleifer: alle Spieler -1 im Strafraum
+        if (COACHES[attackerCoach].special === 'medizinball') {
+            attackerMomentum -= 1;
+        }
+        if (COACHES[defenderCoach].special === 'medizinball') {
+            defenderMomentum -= 1;
+        }
+
+        let attackValue = attacker.attack + attackerMomentum;
+        let defenseValue = goalkeeper.defense + defenderMomentum;
+
+        // Modus C: Stürmer +1
+        if (GAME_MODES[this.mode].strikerBonus && attacker.role === 'ST') {
+            attackValue += GAME_MODES[this.mode].strikerBonus;
+        }
+
+        // Kopfballungeheuer: +1 im Strafraum wenn über Flügelspiel gewonnen
+        if (attacker.special === 'header_bonus' && winningTactic === 'Flügelspiel') {
+            attackValue += 1;
+        }
+
+        // Offensiv-Fanatiker: +1 für Stürmer nach gewonnenem Feldduell
+        if (COACHES[attackerCoach].special === 'offensive_fanatic' && attackerCoachState.fanatikerGoalBonusActive) {
+            attackValue += 1;
+            attackerCoachState.fanatikerGoalBonusActive = false;
+        }
+
+        // Aluminium-Sonderkarte: bei Gleichstand Verteidigung gewinnt immer
+        let aluminumActive = selectedAttackerCard.special === 'aluminum' || selectedDefenderCard.special === 'aluminum';
+
+        let isGoal;
+        if (attackValue > defenseValue) {
+            isGoal = true;
+        } else if (attackValue === defenseValue) {
+            if (aluminumActive) {
+                isGoal = false;
+            } else {
+                // Theoretiker profitiert nie von Rückstands-Regel
+                const theoretiker = isPlayerAttacking
+                    ? COACHES[this.playerCoach].special === 'theoretiker'
+                    : COACHES[this.aiCoach].special === 'theoretiker';
+                if (theoretiker) {
+                    isGoal = false;
+                } else {
+                    isGoal = GAME_MODES[this.mode].drawRule === 'attacker';
+                }
+            }
+        } else {
+            isGoal = false;
+        }
+
+        // Tunnel/Nutmeg: Tor zählt doppelt
+        let goals = isGoal ? 1 : 0;
+        let nutmegActive = false;
+        if (isGoal && (selectedAttackerCard.special === 'nutmeg' || selectedDefenderCard.special === 'nutmeg')) {
+            goals = 2;
+            nutmegActive = true;
+        }
+
+        return { attackValue, defenseValue, isGoal, goals, nutmegActive, aluminumActive,
+                 attackerCard: selectedAttackerCard, defenderCard: selectedDefenderCard,
+                 goalkeeper, attacker };
+    }
+
+    makeAIDecision(phase, context) {
+        if (phase === 'attacker') {
+            const available = this.getAvailableAttackers(false);
+            return available[Math.floor(Math.random() * available.length)];
+        } else if (phase === 'defender') {
             const available = this.getAvailableDefenders(false);
             return available[Math.floor(Math.random() * available.length)];
         } else if (phase === 'attackTactic') {
@@ -369,46 +408,76 @@ class SPIELZUGGame {
         } else if (phase === 'defenseTactic') {
             const tactics = this.getAvailableDefenseTactics(false);
             return tactics[Math.floor(Math.random() * tactics.length)];
+        } else if (phase === 'momentum') {
+            const cards = context;
+            // Präsidenten-Kumpel muss negative Karten zwingend spielen
+            if (COACHES[this.aiCoach].special === 'praesidenten_kumpel') {
+                const negCard = cards.find(c => c.value < 0);
+                if (negCard) return cards.indexOf(negCard);
+            }
+            // KI wählt beste Karte
+            const best = cards.reduce((a, b) => (b.value > a.value ? b : a));
+            return cards.indexOf(best);
         }
         return null;
     }
-    
-    updateAttackCount(isPlayer) {
-        if (isPlayer) {
-            this.attacksThisHalf.player++;
-        } else {
-            this.attacksThisHalf.ai++;
+
+    markPlayerAsUsed(player, isPlayer) {
+        const set = isPlayer ? this.playersPlayedThisHalf : this.aiPlayersPlayedThisHalf;
+        set.add(player.id);
+    }
+
+    reviveExhaustedPlayer(isPlayer) {
+        const team = isPlayer ? this.playerTeam : this.aiTeam;
+        const playedSet = isPlayer ? this.playersPlayedThisHalf : this.aiPlayersPlayedThisHalf;
+        const allOffensive = [team.zm, ...team.st].filter(Boolean);
+        const exhausted = allOffensive.find(p => playedSet.has(p.id));
+        if (exhausted) {
+            playedSet.delete(exhausted.id);
+            return exhausted;
         }
-        this.currentAttackIndex++;
+        return null;
     }
-    
+
+    updateAttackCount(isPlayer) {
+        if (isPlayer) this.attacksThisHalf.player++;
+        else this.attacksThisHalf.ai++;
+    }
+
     isHalfOver() {
-        return this.attacksThisHalf.player >= this.maxAttacksPerHalf && 
-               this.attacksThisHalf.ai >= this.maxAttacksPerHalf;
+        return this.attacksThisHalf.player >= this.getMaxAttacks(true) &&
+               this.attacksThisHalf.ai >= this.getMaxAttacks(false);
     }
-    
+
+    playerHalfDone() {
+        return this.attacksThisHalf.player >= this.getMaxAttacks(true);
+    }
+
+    aiHalfDone() {
+        return this.attacksThisHalf.ai >= this.getMaxAttacks(false);
+    }
+
     startNextHalf() {
         if (this.currentHalf === 1) {
             this.currentHalf = 2;
             this.attacksThisHalf = { player: 0, ai: 0 };
-            this.currentAttackIndex = 0;
-            
-            this.playerTactics = this.initializeTactics();
-            this.aiTactics = this.initializeTactics();
-            
-            // Reset coach states for new half
-            this.playerCoachState.tacticBonusBlocked = false;
-            this.aiCoachState.tacticBonusBlocked = false;
-            
+            this.playersPlayedThisHalf = new Set();
+            this.aiPlayersPlayedThisHalf = new Set();
+            this.playerTactics = this.buildTacticHand();
+            this.aiTactics = this.buildTacticHand();
+            this.playerCoachState.theoretikerPeekUsedThisHalf = false;
+            this.aiCoachState.theoretikerPeekUsedThisHalf = false;
+            this.playerCoachState.dinosaurierFirstAttackDone = false;
+            this.aiCoachState.dinosaurierFirstAttackDone = false;
             return true;
         }
         return false;
     }
-    
+
     isGameOver() {
-        return this.currentHalf > 1 && this.isHalfOver();
+        return this.currentHalf >= 2 && this.isHalfOver();
     }
-    
+
     getWinner() {
         if (this.playerScore > this.aiScore) return 'player';
         if (this.aiScore > this.playerScore) return 'ai';
